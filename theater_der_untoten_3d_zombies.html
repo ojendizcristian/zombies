@@ -1,0 +1,1645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theater der Untoten — 3D Zombies Survival</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+    <style>
+        * { user-select: none; -webkit-user-select: none; box-sizing: border-box; }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background: #070709;
+            font-family: 'Inter', sans-serif; color: #f3f4f6;
+        }
+        #game-canvas {
+            position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1;
+        }
+        .chalk-font {
+            font-family: 'Cinzel', serif;
+            text-shadow: 0 0 12px rgba(220, 38, 38, 0.85), 2px 2px 0px #2a0404;
+        }
+        @keyframes roundPulse {
+            0%, 100% { color: #dc2626; text-shadow: 0 0 14px rgba(220,38,38,0.9); }
+            50% { color: #ffffff; text-shadow: 0 0 22px rgba(255,255,255,0.95); }
+        }
+        .round-changing {
+            animation: roundPulse 0.9s infinite ease-in-out;
+        }
+        @keyframes floatScore {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 0; transform: translateY(-34px) scale(1.15); }
+        }
+        .score-popup {
+            animation: floatScore 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        #blood-vignette {
+            background: radial-gradient(circle, transparent 48%, rgba(165, 12, 12, 0.88) 100%);
+            transition: opacity 0.2s ease-out;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden">
+
+    <!-- 3D WebGL Viewport -->
+    <div id="game-canvas"></div>
+
+    <!-- Blood Damage Vignette -->
+    <div id="blood-vignette" class="pointer-events-none fixed inset-0 z-10 opacity-0"></div>
+
+    <!-- Center Crosshair & Hitmarker -->
+    <div id="hud-reticle" class="pointer-events-none fixed inset-0 z-20 flex items-center justify-center">
+        <div id="crosshair" class="relative w-6 h-6 transition-transform duration-75">
+            <div class="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-2 bg-white/80"></div>
+            <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-0.5 h-2 bg-white/80"></div>
+            <div class="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-0.5 bg-white/80"></div>
+            <div class="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-0.5 bg-white/80"></div>
+        </div>
+        <!-- Hitmarker X -->
+        <div id="hitmarker" class="absolute w-5 h-5 opacity-0 transition-opacity duration-75">
+            <div class="absolute inset-0 border-t-2 border-red-500 rotate-45 translate-y-2"></div>
+            <div class="absolute inset-0 border-t-2 border-red-500 -rotate-45 translate-y-2"></div>
+        </div>
+    </div>
+
+    <!-- Interactive Prompt Banner -->
+    <div id="interact-prompt" class="pointer-events-none fixed top-[58%] left-1/2 -translate-x-1/2 z-20 hidden px-5 py-2 rounded-lg bg-black/75 border border-amber-400/50 text-amber-100 font-semibold text-sm tracking-wide shadow-xl">
+        Press <span class="px-1.5 py-0.5 bg-amber-500/30 border border-amber-400 rounded text-amber-200 font-mono">[F]</span> to Interact
+    </div>
+
+    <!-- Repair Progress Bar -->
+    <div id="Zone-Banner" class="pointer-events-none fixed top-6 left-1/2 -translate-x-1/2 z-20 px-4 py-1 rounded-full bg-black/60 border border-white/10 text-xs uppercase tracking-widest text-amber-200/80">
+        Foyer Lobby — Theater der Untoten
+    </div>
+
+    <!-- Bottom Left: Round Tally, Perk Badges & Points -->
+    <div class="pointer-events-none fixed bottom-6 left-7 z-20 flex flex-col gap-3">
+        <!-- Active Perks Row -->
+        <div id="perks-row" class="flex items-center gap-2 min-h-[36px]">
+            <div id="perk-jugg" class="hidden items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/85 border-2 border-red-300 shadow-[0_0_15px_rgba(220,38,38,0.8)] text-xs font-extrabold tracking-wider uppercase">
+                <span>✚</span> <span>Vitality Soda</span>
+            </div>
+        </div>
+
+        <div class="flex items-end gap-6">
+            <!-- Round Counter -->
+            <div class="flex flex-col">
+                <span class="text-[10px] uppercase tracking-widest text-red-400/80 font-bold">Round</span>
+                <div id="round-display" class="chalk-font text-5xl sm:text-6xl font-black text-red-600 leading-none tracking-tighter">
+                    I
+                </div>
+            </div>
+
+            <!-- Points Box -->
+            <div class="relative flex items-center gap-3 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-950/80 to-black/80 border border-amber-500/40 shadow-lg">
+                <div class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]"></div>
+                <div>
+                    <div class="text-[10px] uppercase tracking-wider text-amber-300/70 font-bold">Essence Points</div>
+                    <div id="points-display" class="font-mono text-2xl font-extrabold text-amber-300">500</div>
+                </div>
+                <div id="score-popups" class="absolute -top-3 right-2 flex flex-col items-end pointer-events-none"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Right: Weapon Name, Ammo & Tactical Decoy -->
+    <div class="pointer-events-none fixed bottom-6 right-7 z-20 flex flex-col items-end gap-2">
+        <!-- Tactical Slot (Clockwork Jester) -->
+        <div class="flex items-center gap-2 px-3 py-1 rounded-lg bg-black/70 border border-white/15 text-xs">
+            <span class="text-purple-300 font-bold">[G] Clockwork Jester:</span>
+            <span id="tactical-count" class="font-mono font-bold text-amber-300">0</span>
+        </div>
+
+        <!-- Weapon & Ammo Card -->
+        <div class="flex flex-col items-end px-5 py-3 rounded-2xl bg-black/75 border border-white/15 shadow-2xl min-w-[220px]">
+            <div class="flex items-center justify-between w-full gap-4 mb-1">
+                <span id="slot-indicator" class="text-[10px] uppercase px-2 py-0.5 rounded bg-white/10 text-white/70 font-bold">Slot 1</span>
+                <span id="weapon-name" class="font-extrabold text-sm sm:text-base tracking-wide text-amber-200">1911 Sidearm</span>
+            </div>
+            <div class="flex items-baseline gap-1.5 font-mono">
+                <span id="ammo-mag" class="text-4xl font-extrabold text-white">8</span>
+                <span class="text-xl text-white/40">/</span>
+                <span id="ammo-reserve" class="text-xl font-bold text-white/75">64</span>
+            </div>
+            <div id="reload-warning" class="hidden text-xs font-bold uppercase tracking-wider text-amber-400 animate-pulse mt-1">
+                Press [R] to Reload
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause / Start Overlay Modal -->
+    <div id="start-overlay" class="fixed inset-0 z-30 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+        <div class="max-w-lg w-full rounded-3xl bg-zinc-900/95 border border-red-500/40 p-7 text-center shadow-2xl">
+            <div class="inline-block px-3 py-1 rounded-full bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-bold uppercase tracking-widest mb-2">
+                Survival Arena
+            </div>
+            <h1 class="chalk-font text-4xl sm:text-5xl font-black text-red-500 mb-2">THEATER DER UNTOTEN</h1>
+            <p class="text-xs sm:text-sm text-zinc-400 mb-6">
+                Hold the Foyer Lobby, earn points to clear the auditorium debris, unlock Vitality Soda, and roll the Stage Mystery Crate for the Aether Ray-X1.
+            </p>
+
+            <div class="grid grid-cols-2 gap-2.5 text-left text-xs bg-black/60 p-4 rounded-2xl border border-white/10 mb-6">
+                <div><span class="text-amber-300 font-bold">WASD + Shift:</span> Move & Sprint</div>
+                <div><span class="text-amber-300 font-bold">L-Click / R-Click:</span> Fire / ADS Zoom</div>
+                <div><span class="text-amber-300 font-bold">R:</span> Reload Weapon</div>
+                <div><span class="text-amber-300 font-bold">1 / 2 / Scroll:</span> Switch Weapon</div>
+                <div><span class="text-amber-300 font-bold">F:</span> Buy / Rebuild / Mystery Box</div>
+                <div><span class="text-amber-300 font-bold">G:</span> Throw Clockwork Jester</div>
+            </div>
+
+            <button id="btn-play" class="w-full py-3.5 rounded-xl bg-red-600 hover:bg-red-500 active:scale-98 text-white font-extrabold tracking-wider uppercase text-sm shadow-lg shadow-red-600/30 transition">
+                Click to Lock Cursor & Enter Theater
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="gameover-overlay" class="fixed inset-0 z-30 hidden items-center justify-center bg-black/90 backdrop-blur-md p-4">
+        <div class="max-w-md w-full rounded-3xl bg-zinc-950 border border-red-600/60 p-8 text-center shadow-2xl">
+            <h2 class="chalk-font text-5xl font-black text-red-600 mb-2">YOU SURVIVED</h2>
+            <p id="gameover-rounds" class="chalk-font text-3xl text-white mb-4">5 ROUNDS</p>
+            <p id="gameover-stats" class="text-xs text-zinc-400 mb-6">Kills: 0 • Headshots: 0 • Total Score: 500</p>
+            <button onclick="resetGame()" class="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-extrabold uppercase tracking-wider text-sm transition">
+                Play Again
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================================
+        // 1. PROCEDURAL WEB AUDIO SYNTHESIZER (GUNSHOTS, RAYGUN, ROUNDS, CHIMES)
+        // ============================================================================
+        let audioCtx = null;
+        function getAudio() {
+            if (!audioCtx) {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (AC) audioCtx = new AC();
+            }
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            return audioCtx;
+        }
+
+        function playSound(type) {
+            const ctx = getAudio();
+            if (!ctx) return;
+            const now = ctx.currentTime;
+
+            if (type === 'pistol' || type === 'rifle' || type === 'ar') {
+                // Punchy noise burst + low thump
+                const dur = type === 'rifle' ? 0.22 : 0.14;
+                const bufSize = Math.floor(ctx.sampleRate * dur);
+                const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+                const data = buf.getChannelData(0);
+                for (let i = 0; i < bufSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.28));
+                }
+                const noise = ctx.createBufferSource();
+                noise.buffer = buf;
+
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.setValueAtTime(type === 'rifle' ? 680 : 950, now);
+
+                const gain = ctx.createGain();
+                gain.gain.setValueAtTime(0.32, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(ctx.destination);
+                noise.start(now);
+
+                const osc = ctx.createOscillator();
+                const oGain = ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(type === 'rifle' ? 150 : 210, now);
+                osc.frequency.exponentialRampToValueAtTime(38, now + 0.11);
+                oGain.gain.setValueAtTime(0.38, now);
+                oGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+                osc.connect(oGain);
+                oGain.connect(ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.12);
+
+            } else if (type === 'raygun') {
+                // Iconic sci-fi atomic laser sweep
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(1450, now);
+                osc.frequency.exponentialRampToValueAtTime(180, now + 0.28);
+                gain.gain.setValueAtTime(0.24, now);
+                gain.gain.exponentialRampToValueAtTime(0.002, now + 0.30);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.30);
+
+            } else if (type === 'explosion') {
+                const dur = 0.65;
+                const bufSize = Math.floor(ctx.sampleRate * dur);
+                const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+                const data = buf.getChannelData(0);
+                for (let i = 0; i < bufSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.35));
+                }
+                const noise = ctx.createBufferSource();
+                noise.buffer = buf;
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(340, now);
+                const gain = ctx.createGain();
+                gain.gain.setValueAtTime(0.55, now);
+                gain.gain.exponentialRampToValueAtTime(0.005, now + dur);
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(ctx.destination);
+                noise.start(now);
+
+            } else if (type === 'cash' || type === 'plank') {
+                const freqs = type === 'cash' ? [587, 880, 1174] : [320, 480];
+                freqs.forEach((f, idx) => {
+                    const osc = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(f, now + idx * 0.045);
+                    g.gain.setValueAtTime(0.12, now + idx * 0.045);
+                    g.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.045 + 0.16);
+                    osc.connect(g);
+                    g.connect(ctx.destination);
+                    osc.start(now + idx * 0.045);
+                    osc.stop(now + idx * 0.045 + 0.17);
+                });
+
+            } else if (type === 'jester_chime') {
+                [523, 659, 783, 1046].forEach((f, idx) => {
+                    const osc = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(f, now + idx * 0.05);
+                    g.gain.setValueAtTime(0.11, now + idx * 0.05);
+                    g.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.12);
+                    osc.connect(g);
+                    g.connect(ctx.destination);
+                    osc.start(now + idx * 0.05);
+                    osc.stop(now + idx * 0.05 + 0.13);
+                });
+
+            } else if (type === 'round_change') {
+                // Eerie minor chord sting
+                [146.8, 174.6, 220, 293.6].forEach((f) => {
+                    const osc = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(f, now);
+                    g.gain.setValueAtTime(0.07, now);
+                    g.gain.exponentialRampToValueAtTime(0.0008, now + 2.1);
+                    osc.connect(g);
+                    g.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 2.15);
+                });
+            }
+        }
+
+        // ============================================================================
+        // 2. WEAPON DEFINITIONS & GAME STATE
+        // ============================================================================
+        const WEAPON_DB = {
+            pistol1911: {
+                id: 'pistol1911',
+                name: '1911 Sidearm',
+                auto: false,
+                damage: 45,
+                headMult: 2.3,
+                fireRate: 0.17,
+                magSize: 8,
+                maxReserve: 64,
+                reloadTime: 1.35,
+                sound: 'pistol',
+                color: 0xd4d4d8,
+                isRaygun: false
+            },
+            m14: {
+                id: 'm14',
+                name: 'M14 Tactical Carbine',
+                auto: false,
+                damage: 105,
+                headMult: 2.6,
+                fireRate: 0.22,
+                magSize: 12,
+                maxReserve: 96,
+                reloadTime: 1.65,
+                sound: 'rifle',
+                color: 0x78350f,
+                isRaygun: false
+            },
+            krig: {
+                id: 'krig',
+                name: 'Krig-A1 Assault Rifle',
+                auto: true,
+                damage: 68,
+                headMult: 2.2,
+                fireRate: 0.095,
+                magSize: 30,
+                maxReserve: 180,
+                reloadTime: 1.75,
+                sound: 'ar',
+                color: 0x3f3f46,
+                isRaygun: false
+            },
+            raygun: {
+                id: 'raygun',
+                name: 'Aether Ray-X1',
+                auto: true,
+                damage: 420,
+                headMult: 1.5,
+                fireRate: 0.34,
+                magSize: 20,
+                maxReserve: 120,
+                reloadTime: 1.9,
+                sound: 'raygun',
+                color: 0x10b981,
+                isRaygun: true
+            }
+        };
+
+        const container = document.getElementById('game-canvas');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b0a10);
+        scene.fog = new THREE.FogExp2(0x0b0a10, 0.025);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 120);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // First-Person Viewmodel Rig attached to Camera
+        const weaponRig = new THREE.Group();
+        camera.add(weaponRig);
+        scene.add(camera);
+
+        let gunMeshGroup = new THREE.Group();
+        weaponRig.add(gunMeshGroup);
+
+        const muzzleLight = new THREE.PointLight(0xffb74d, 0, 8);
+        muzzleLight.position.set(0, 0.1, -1.2);
+        camera.add(muzzleLight);
+
+        function rebuildViewModel(weaponKey) {
+            while (gunMeshGroup.children.length > 0) {
+                gunMeshGroup.remove(gunMeshGroup.children[0]);
+            }
+            const spec = WEAPON_DB[weaponKey];
+            const bodyMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.35, metalness: 0.6 });
+            const darkMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.5, metalness: 0.7 });
+
+            if (weaponKey === 'raygun') {
+                // Retro Atomic Blaster with Neon Green Coils
+                const receiver = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.48, 12), bodyMat);
+                receiver.rotation.x = Math.PI / 2;
+                gunMeshGroup.add(receiver);
+
+                const coilMat = new THREE.MeshBasicMaterial({ color: 0x4ade80 });
+                for (let i = 0; i < 3; i++) {
+                    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.014, 8, 16), coilMat);
+                    ring.position.z = -0.08 - i * 0.09;
+                    gunMeshGroup.add(ring);
+                }
+                const tip = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 10), coilMat);
+                tip.position.z = -0.32;
+                gunMeshGroup.add(tip);
+            } else {
+                const len = weaponKey === 'pistol1911' ? 0.36 : 0.68;
+                const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.10, len), bodyMat);
+                receiver.position.z = -len * 0.35;
+                gunMeshGroup.add(receiver);
+
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, len + 0.15, 8), darkMat);
+                barrel.rotation.x = Math.PI / 2;
+                barrel.position.set(0, 0.02, -len * 0.45);
+                gunMeshGroup.add(barrel);
+
+                const sight = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.03, 0.02), darkMat);
+                sight.position.set(0, 0.065, -len * 0.75);
+                gunMeshGroup.add(sight);
+            }
+
+            const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.08), darkMat);
+            grip.position.set(0, -0.1, 0.04);
+            grip.rotation.x = 0.25;
+            gunMeshGroup.add(grip);
+        }
+
+        // ============================================================================
+        // 3. THEATER DER UNTOTEN ENVIRONMENT (LOBBY + AUDITORIUM & STAGE)
+        // ============================================================================
+        const wallColliders = []; // { minX, maxX, minZ, maxZ, active }
+        const windows = [];       // 4 Zombie Barricade Windows
+        let debrisDoorGroup = null;
+        let debrisCollider = null;
+        let mysteryCrateGroup = null;
+        let cratePreviewMesh = null;
+        let crateBeam = null;
+
+        function buildTheaterMap() {
+            const ambient = new THREE.HemisphereLight(0xffe0b2, 0x181424, 0.52);
+            scene.add(ambient);
+
+            // Floor (Lobby: Z=16 to Z=0, Auditorium & Stage: Z=0 to Z=-26)
+            const floorMatLobby = new THREE.MeshStandardMaterial({ color: 0x26212c, roughness: 0.7 });
+            const floorLobby = new THREE.Mesh(new THREE.PlaneGeometry(24, 18), floorMatLobby);
+            floorLobby.rotation.x = -Math.PI / 2;
+            floorLobby.position.set(0, 0, 8);
+            floorLobby.receiveShadow = true;
+            scene.add(floorLobby);
+
+            // Red Carpet Runner in Lobby
+            const carpetMat = new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.85 });
+            const lobbyCarpet = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 15), carpetMat);
+            lobbyCarpet.rotation.x = -Math.PI / 2;
+            lobbyCarpet.position.set(0, 0.01, 8);
+            scene.add(lobbyCarpet);
+
+            // Auditorium & Stage Floor
+            const floorMatTheater = new THREE.MeshStandardMaterial({ color: 0x1c1917, roughness: 0.8 });
+            const floorTheater = new THREE.Mesh(new THREE.PlaneGeometry(28, 28), floorMatTheater);
+            floorTheater.rotation.x = -Math.PI / 2;
+            floorTheater.position.set(0, 0, -13);
+            floorTheater.receiveShadow = true;
+            scene.add(floorTheater);
+
+            // Raised Wooden Stage at North end (Z = -18 to -25)
+            const stageMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.65 });
+            const stagePlatform = new THREE.Mesh(new THREE.BoxGeometry(20, 0.6, 8), stageMat);
+            stagePlatform.position.set(0, 0.3, -21.5);
+            stagePlatform.receiveShadow = true;
+            scene.add(stagePlatform);
+
+            // Crimson Stage Curtains
+            const curtainMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.75 });
+            [-8.5, 8.5].forEach(cx => {
+                const drape = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 7.5, 12), curtainMat);
+                drape.position.set(cx, 3.8, -18.2);
+                scene.add(drape);
+            });
+
+            // Ceiling
+            const ceilMat = new THREE.MeshStandardMaterial({ color: 0x111015, roughness: 0.9 });
+            const ceil = new THREE.Mesh(new THREE.PlaneGeometry(32, 48), ceilMat);
+            ceil.rotation.x = Math.PI / 2;
+            ceil.position.set(0, 7.5, -5);
+            scene.add(ceil);
+
+            // Warm Chandeliers / Point Lights
+            const lightCoords = [
+                { x: 0, y: 6.2, z: 9, color: 0xffb74d, intensity: 1.15 },
+                { x: 0, y: 6.2, z: -7, color: 0xffcc80, intensity: 1.0 },
+                { x: 0, y: 6.4, z: -20, color: 0x38bdf8, intensity: 1.25 } // Stage Spotlight
+            ];
+            lightCoords.forEach(lc => {
+                const pt = new THREE.PointLight(lc.color, lc.intensity, 25);
+                pt.position.set(lc.x, lc.y, lc.z);
+                scene.add(pt);
+            });
+
+            // Helper to build walls & register collision boxes
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x2d2836, roughness: 0.82 });
+            function addWall(x, z, w, d, h = 7.5) {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+                mesh.position.set(x, h / 2, z);
+                scene.add(mesh);
+                const col = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, active: true };
+                wallColliders.push(col);
+                return { mesh, col };
+            }
+
+            // Outer Perimeter Bounds
+            addWall(0, 16.5, 22, 1);    // South Lobby Back Wall
+            addWall(-11, 8, 1, 17);     // West Lobby Wall
+            addWall(11, 8, 1, 17);      // East Lobby Wall
+
+            // Partition Wall between Lobby and Auditorium (Z = 0) with Central Doorway (X = -2.2 to 2.2)
+            addWall(-6.8, 0, 8.8, 1);
+            addWall(6.8, 0, 8.8, 1);
+
+            // Auditorium Outer Walls (Z = 0 to -26)
+            addWall(-13, -13, 1, 26);   // West Auditorium Wall
+            addWall(13, -13, 1, 26);    // East Auditorium Wall
+            addWall(0, -25.5, 26, 1);   // North Stage Backstage Wall
+
+            // Theater Seating Rows in Auditorium (Obstacles with low height)
+            const seatMat = new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.7 });
+            [-5.5, 5.5].forEach(bankX => {
+                [-6, -10, -14].forEach(rowZ => {
+                    const rowMesh = new THREE.Mesh(new THREE.BoxGeometry(6.2, 1.0, 1.1), seatMat);
+                    rowMesh.position.set(bankX, 0.5, rowZ);
+                    scene.add(rowMesh);
+                    wallColliders.push({
+                        minX: bankX - 3.1, maxX: bankX + 3.1,
+                        minZ: rowZ - 0.55, maxZ: rowZ + 0.55,
+                        active: true
+                    });
+                });
+            });
+
+            // 1. CLEARABLE DEBRIS DOORWAY (Z = 0, X = 0) — 750 PTS
+            debrisDoorGroup = new THREE.Group();
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.85 });
+            for (let i = 0; i < 6; i++) {
+                const beam = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.35, 0.4), woodMat);
+                beam.position.set(0, 0.5 + i * 0.65, (i % 2 === 0 ? 0.1 : -0.1));
+                beam.rotation.z = (i % 2 === 0 ? 0.12 : -0.15);
+                debrisDoorGroup.add(beam);
+            }
+            scene.add(debrisDoorGroup);
+            debrisCollider = { minX: -2.4, maxX: 2.4, minZ: -0.6, maxZ: 0.6, active: true };
+            wallColliders.push(debrisCollider);
+
+            // 2. M14 CARBINE WALL-BUY (Lobby East Wall: X = 10.3, Z = 5.5) — 500 PTS
+            const chalkGroup = new THREE.Group();
+            chalkGroup.position.set(10.42, 1.65, 5.5);
+            chalkGroup.rotation.y = -Math.PI / 2;
+            const chalkBack = new THREE.Mesh(
+                new THREE.PlaneGeometry(1.8, 0.75),
+                new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
+            );
+            chalkGroup.add(chalkBack);
+            const gunSil = new THREE.Mesh(
+                new THREE.BoxGeometry(1.25, 0.22, 0.05),
+                new THREE.MeshBasicMaterial({ color: 0xe0f2fe })
+            );
+            chalkGroup.add(gunSil);
+            scene.add(chalkGroup);
+
+            // 3. VITALITY SODA PERK MACHINE (Auditorium West Wall: X = -11.6, Z = -16) — 2500 PTS
+            const perkGroup = new THREE.Group();
+            perkGroup.position.set(-11.6, 0, -16);
+            const vendingBody = new THREE.Mesh(
+                new THREE.BoxGeometry(1.4, 3.2, 1.4),
+                new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.3, metalness: 0.4 })
+            );
+            vendingBody.position.y = 1.6;
+            perkGroup.add(vendingBody);
+            const vendingGlow = new THREE.Mesh(
+                new THREE.BoxGeometry(1.45, 0.8, 1.1),
+                new THREE.MeshBasicMaterial({ color: 0xfef08a })
+            );
+            vendingGlow.position.y = 2.4;
+            perkGroup.add(vendingGlow);
+            const perkLight = new THREE.PointLight(0xef4444, 1.1, 7);
+            perkLight.position.set(1.2, 2.2, 0);
+            perkGroup.add(perkLight);
+            scene.add(perkGroup);
+
+            // 4. MYSTERY CRATE ON STAGE (X = 0, Y = 0.6, Z = -21.5) — 950 PTS
+            mysteryCrateGroup = new THREE.Group();
+            mysteryCrateGroup.position.set(0, 0.6, -21.5);
+            const boxMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(2.4, 0.95, 1.1),
+                new THREE.MeshStandardMaterial({ color: 0x713f12, roughness: 0.7 })
+            );
+            boxMesh.position.y = 0.48;
+            mysteryCrateGroup.add(boxMesh);
+
+            // Glowing question mark runes on front
+            const runeStrip = new THREE.Mesh(
+                new THREE.BoxGeometry(1.9, 0.35, 1.14),
+                new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+            );
+            runeStrip.position.y = 0.52;
+            mysteryCrateGroup.add(runeStrip);
+
+            // Vertical Mystery Crate Sky Beam
+            crateBeam = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.65, 0.65, 14, 16, 1, true),
+                new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.16, side: THREE.DoubleSide })
+            );
+            crateBeam.position.y = 7;
+            mysteryCrateGroup.add(crateBeam);
+
+            // Floating Weapon Preview Holder
+            cratePreviewMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.9, 0.25, 0.18),
+                new THREE.MeshBasicMaterial({ color: 0x4ade80 })
+            );
+            cratePreviewMesh.position.y = 1.45;
+            cratePreviewMesh.visible = false;
+            mysteryCrateGroup.add(cratePreviewMesh);
+
+            scene.add(mysteryCrateGroup);
+
+            // 5. FOUR BARRICADE WINDOWS (2 in Lobby, 2 in Theater)
+            const windowDefs = [
+                { id: 0, zone: 'lobby', x: -10.4, z: 10, spawnX: -14.5, spawnZ: 10, enterX: -9.0, enterZ: 10, rotY: Math.PI / 2 },
+                { id: 1, zone: 'lobby', x: 10.4, z: 11, spawnX: 14.5, spawnZ: 11, enterX: 9.0, enterZ: 11, rotY: -Math.PI / 2 },
+                { id: 2, zone: 'theater', x: -12.4, z: -8, spawnX: -16.5, spawnZ: -8, enterX: -10.8, enterZ: -8, rotY: Math.PI / 2 },
+                { id: 3, zone: 'theater', x: 12.4, z: -8, spawnX: 16.5, spawnZ: -8, enterX: 10.8, enterZ: -8, rotY: -Math.PI / 2 }
+            ];
+
+            windowDefs.forEach(wd => {
+                const wGroup = new THREE.Group();
+                wGroup.position.set(wd.x, 0, wd.z);
+                wGroup.rotation.y = wd.rotY;
+
+                // Dark window alcove backdrop
+                const hole = new THREE.Mesh(
+                    new THREE.BoxGeometry(2.3, 2.8, 0.25),
+                    new THREE.MeshBasicMaterial({ color: 0x040407 })
+                );
+                hole.position.y = 1.7;
+                wGroup.add(hole);
+
+                // 5 Repairable Wooden Planks
+                const plankMeshes = [];
+                for (let p = 0; p < 5; p++) {
+                    const pm = new THREE.Mesh(
+                        new THREE.BoxGeometry(2.35, 0.22, 0.12),
+                        woodMat
+                    );
+                    pm.position.set(0, 0.85 + p * 0.42, 0.16);
+                    pm.rotation.z = (p % 2 === 0 ? 0.04 : -0.05);
+                    wGroup.add(pm);
+                    plankMeshes.push(pm);
+                }
+
+                scene.add(wGroup);
+                windows.push({
+                    ...wd,
+                    planks: 5,
+                    maxPlanks: 5,
+                    plankMeshes
+                });
+            });
+        }
+
+        // ============================================================================
+        // 4. PLAYER CONTROLLER, INVENTORY, & MYSTERY CRATE STATE
+        // ============================================================================
+        const player = {
+            pos: new THREE.Vector3(0, 1.7, 11),
+            velY: 0,
+            yaw: 0,
+            pitch: 0,
+            hp: 100,
+            maxHp: 100,
+            lastHitTime: 0,
+            points: 500,
+            kills: 0,
+            headshots: 0,
+            hasVitalitySoda: false,
+            theaterUnlocked: false,
+            tacticalCount: 2, // Start with 2 Clockwork Jesters so player can test them immediately!
+            weapons: [
+                { id: 'pistol1911', mag: 8, reserve: 64 }
+            ],
+            activeSlot: 0,
+            isReloading: false,
+            reloadEndTime: 0,
+            lastFireTime: 0,
+            isADS: false,
+            recoilKick: 0,
+            lastRepairTime: 0
+        };
+
+        const crateState = {
+            status: 'idle', // 'idle', 'rolling', 'ready'
+            timer: 0,
+            offeredItem: null // 'krig', 'raygun', 'jester'
+        };
+
+        // Active Clockwork Jester Decoy in the arena
+        let activeDecoy = null; // { mesh, ring, pos, timer, nextChime }
+        const plasmaBolts = []; // Projectiles from Aether Ray-X1
+        const shockwaveRings = [];
+
+        // ============================================================================
+        // 5. ZOMBIE HORDE AI & ROUND MANAGER
+        // ============================================================================
+        const zombies = [];
+        const roundState = {
+            round: 1,
+            remainingToSpawn: 6,
+            spawnCooldown: 1.5,
+            inIntermission: false,
+            intermissionTimer: 0
+        };
+
+        const zSkinMat = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.8 });
+        const zCoatMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+        const zEyeMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+
+        function spawnZombie() {
+            const availWindows = windows.filter(w => w.zone === 'lobby' || player.theaterUnlocked);
+            const win = availWindows[Math.floor(Math.random() * availWindows.length)];
+
+            const root = new THREE.Group();
+            root.position.set(win.spawnX, 0, win.spawnZ);
+
+            // Torso
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.68, 1.05, 0.38), zCoatMat);
+            torso.position.y = 1.05;
+            root.add(torso);
+
+            // Legs
+            const legL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.75, 0.28), zCoatMat);
+            legL.position.set(-0.18, 0.38, 0);
+            const legR = legL.clone();
+            legR.position.x = 0.18;
+            root.add(legL, legR);
+
+            // Outstretched Zombie Arms
+            const armL = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.20, 0.72), zSkinMat);
+            armL.position.set(-0.44, 1.38, 0.32);
+            const armR = armL.clone();
+            armR.position.x = 0.44;
+            root.add(armL, armR);
+
+            // Head (Separate Hitbox for Headshot Multiplier!)
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.44, 0.44), zSkinMat);
+            head.position.y = 1.82;
+            head.userData.isHead = true;
+            root.add(head);
+
+            // Glowing Eyes
+            const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.05), zEyeMat);
+            eyeL.position.set(-0.1, 1.86, 0.22);
+            const eyeR = eyeL.clone();
+            eyeR.position.x = 0.1;
+            root.add(eyeL, eyeR);
+
+            scene.add(root);
+
+            const baseHp = 100 + (roundState.round - 1) * 55;
+            const baseSpeed = Math.min(4.6, 1.95 + (roundState.round - 1) * 0.25 + Math.random() * 0.35);
+
+            const zObj = {
+                mesh: root,
+                headMesh: head,
+                torsoMesh: torso,
+                hp: baseHp,
+                maxHp: baseHp,
+                speed: baseSpeed,
+                state: 'outside', // 'outside' -> 'tearing' -> 'entering' -> 'chasing'
+                targetWindow: win,
+                attackTimer: 0,
+                wobbleSeed: Math.random() * 10
+            };
+
+            torso.userData.zombie = zObj;
+            head.userData.zombie = zObj;
+            zombies.push(zObj);
+        }
+
+        function damageZombie(z, dmg, isHeadshot) {
+            const idx = zombies.indexOf(z);
+            if (idx === -1) return;
+
+            z.hp -= dmg;
+            showHitmarker();
+
+            if (z.hp <= 0) {
+                const pts = isHeadshot ? 100 : 60;
+                addPoints(pts);
+                player.kills++;
+                if (isHeadshot) player.headshots++;
+
+                // Spawn red particle burst
+                spawnBloodBurst(z.mesh.position.clone().add(new THREE.Vector3(0, isHeadshot ? 1.8 : 1.1, 0)));
+                scene.remove(z.mesh);
+                zombies.splice(idx, 1);
+            } else {
+                addPoints(10);
+            }
+        }
+
+        const bloodParticles = [];
+        const bloodMat = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
+        const bloodGeo = new THREE.BoxGeometry(0.11, 0.11, 0.11);
+
+        function spawnBloodBurst(pos) {
+            for (let i = 0; i < 10; i++) {
+                const m = new THREE.Mesh(bloodGeo, bloodMat);
+                m.position.copy(pos);
+                scene.add(m);
+                bloodParticles.push({
+                    mesh: m,
+                    vel: new THREE.Vector3((Math.random() - 0.5) * 5, 1.5 + Math.random() * 3.5, (Math.random() - 0.5) * 5),
+                    life: 0.45
+                });
+            }
+        }
+
+        // ============================================================================
+        // 6. HUD HELPERS & FLOATING POINTS
+        // ============================================================================
+        function toRomanOrTally(n) {
+            const tallies = ['', 'I', 'II', 'III', 'IIII', 'IIIII'];
+            return n <= 5 ? tallies[n] : String(n);
+        }
+
+        function addPoints(delta) {
+            player.points += delta;
+            document.getElementById('points-display').textContent = player.points;
+
+            const container = document.getElementById('score-popups');
+            const el = document.createElement('div');
+            el.className = `score-popup font-mono text-sm font-extrabold ${delta >= 0 ? 'text-amber-300' : 'text-red-400'}`;
+            el.textContent = (delta >= 0 ? '+' : '') + delta;
+            container.appendChild(el);
+            setTimeout(() => el.remove(), 850);
+        }
+
+        function updateHUD() {
+            const activeWep = player.weapons[player.activeSlot];
+            const spec = WEAPON_DB[activeWep.id];
+
+            document.getElementById('slot-indicator').textContent = `Slot ${player.activeSlot + 1}/${player.weapons.length}`;
+            document.getElementById('weapon-name').textContent = spec.name;
+            document.getElementById('ammo-mag').textContent = activeWep.mag;
+            document.getElementById('ammo-reserve').textContent = activeWep.reserve;
+            document.getElementById('tactical-count').textContent = player.tacticalCount;
+            document.getElementById('points-display').textContent = player.points;
+
+            const reloadWarn = document.getElementById('reload-warning');
+            if (player.isReloading) {
+                reloadWarn.textContent = 'Reloading...';
+                reloadWarn.classList.remove('hidden');
+            } else if (activeWep.mag <= Math.ceil(spec.magSize * 0.25)) {
+                reloadWarn.textContent = activeWep.mag === 0 ? 'EMPTY — Press [R]' : 'Low Ammo [R]';
+                reloadWarn.classList.remove('hidden');
+            } else {
+                reloadWarn.classList.add('hidden');
+            }
+
+            const zoneEl = document.getElementById('Zone-Banner');
+            zoneEl.textContent = player.pos.z < 0
+                ? 'Theater Auditorium & Stage — Theater der Untoten'
+                : 'Foyer Lobby — Theater der Untoten';
+        }
+
+        function showHitmarker() {
+            const hm = document.getElementById('hitmarker');
+            hm.style.opacity = '1';
+            setTimeout(() => { hm.style.opacity = '0'; }, 90);
+        }
+
+        // ============================================================================
+        // 7. COMBAT, SHOOTING, RAYGUN SPLASH, & CLOCKWORK JESTER DECOY
+        // ============================================================================
+        const raycaster = new THREE.Raycaster();
+
+        function fireCurrentWeapon(elapsed) {
+            if (player.isReloading) return;
+            const activeWep = player.weapons[player.activeSlot];
+            const spec = WEAPON_DB[activeWep.id];
+
+            if (elapsed - player.lastFireTime < spec.fireRate) return;
+            if (activeWep.mag <= 0) {
+                startReload(elapsed);
+                return;
+            }
+
+            activeWep.mag--;
+            player.lastFireTime = elapsed;
+            player.recoilKick = 0.085;
+            playSound(spec.sound);
+
+            // Flash Muzzle Light
+            muzzleLight.color.setHex(spec.isRaygun ? 0x4ade80 : 0xffb74d);
+            muzzleLight.intensity = 2.6;
+            setTimeout(() => { muzzleLight.intensity = 0; }, 55);
+
+            updateHUD();
+
+            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+
+            if (spec.isRaygun) {
+                // Spawn Glowing Green Plasma Orb Projectile
+                const orb = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.14, 10, 10),
+                    new THREE.MeshBasicMaterial({ color: 0x4ade80 })
+                );
+                orb.position.copy(camera.position).addScaledVector(dir, 0.8);
+                scene.add(orb);
+                plasmaBolts.push({
+                    mesh: orb,
+                    vel: dir.clone().multiplyScalar(34),
+                    life: 2.0
+                });
+            } else {
+                // Hitscan Raycast against Zombies
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const hitTargets = [];
+                zombies.forEach(z => {
+                    hitTargets.push(z.headMesh, z.torsoMesh);
+                });
+
+                const hits = raycaster.intersectObjects(hitTargets, false);
+                if (hits.length > 0) {
+                    const hitObj = hits[0].object;
+                    const z = hitObj.userData.zombie;
+                    const isHead = !!hitObj.userData.isHead;
+                    const finalDmg = isHead ? spec.damage * spec.headMult : spec.damage;
+                    damageZombie(z, finalDmg, isHead);
+                }
+            }
+        }
+
+        function startReload(elapsed) {
+            const activeWep = player.weapons[player.activeSlot];
+            const spec = WEAPON_DB[activeWep.id];
+            if (player.isReloading || activeWep.mag === spec.magSize || activeWep.reserve <= 0) return;
+
+            player.isReloading = true;
+            player.reloadEndTime = elapsed + spec.reloadTime;
+            playSound('plank');
+            updateHUD();
+        }
+
+        function throwClockworkJester() {
+            if (player.tacticalCount <= 0 || activeDecoy) return;
+            player.tacticalCount--;
+            updateHUD();
+
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            forward.y = 0;
+            forward.normalize();
+
+            const targetPos = player.pos.clone().addScaledVector(forward, 4.5);
+            targetPos.x = Math.max(-9.5, Math.min(9.5, targetPos.x));
+            targetPos.z = Math.max(-23, Math.min(14, targetPos.z));
+            targetPos.y = player.pos.z < -17.5 ? 0.6 : 0;
+
+            const jesterGroup = new THREE.Group();
+            jesterGroup.position.copy(targetPos);
+
+            const body = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.22, 0.28, 0.55, 10),
+                new THREE.MeshStandardMaterial({ color: 0xa855f7 })
+            );
+            body.position.y = 0.28;
+            jesterGroup.add(body);
+
+            const hat = new THREE.Mesh(
+                new THREE.ConeGeometry(0.26, 0.35, 8),
+                new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+            );
+            hat.position.y = 0.72;
+            jesterGroup.add(hat);
+
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(0.4, 0.58, 24),
+                new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.05;
+            jesterGroup.add(ring);
+
+            scene.add(jesterGroup);
+            playSound('jester_chime');
+
+            activeDecoy = {
+                mesh: jesterGroup,
+                ring,
+                pos: targetPos,
+                timer: 6.0,
+                nextChime: 0.75
+            };
+        }
+
+        function spawnShockwave(pos, colorHex, maxScale = 6) {
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(0.25, 0.55, 28),
+                new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.copy(pos);
+            ring.position.y += 0.08;
+            scene.add(ring);
+            shockwaveRings.push({ mesh: ring, age: 0, maxAge: 0.45, maxScale });
+        }
+
+        // ============================================================================
+        // 8. CONTEXTUAL INTERACTION SYSTEM ([F] KEY)
+        // ============================================================================
+        function getClosestInteraction() {
+            const p = player.pos;
+
+            // 1. Debris Door at (0, 0)
+            if (!player.theaterUnlocked && Math.hypot(p.x - 0, p.z - 0) < 3.4) {
+                return {
+                    type: 'door',
+                    cost: 750,
+                    label: 'Press [F] to Clear Auditorium Debris [Cost: 750]'
+                };
+            }
+
+            // 2. M14 Wall-Buy at (10.4, 5.5)
+            if (Math.hypot(p.x - 10.4, p.z - 5.5) < 3.0) {
+                const ownsM14 = player.weapons.some(w => w.id === 'm14');
+                return {
+                    type: 'm14',
+                    cost: ownsM14 ? 250 : 500,
+                    label: ownsM14
+                        ? 'Press [F] to Buy M14 Ammo [Cost: 250]'
+                        : 'Press [F] to Buy M14 Tactical Carbine [Cost: 500]'
+                };
+            }
+
+            // 3. Vitality Soda Perk at (-11.6, -16)
+            if (player.theaterUnlocked && !player.hasVitalitySoda && Math.hypot(p.x - (-11.6), p.z - (-16)) < 3.2) {
+                return {
+                    type: 'perk',
+                    cost: 2500,
+                    label: 'Press [F] to Buy Vitality Soda (250 HP) [Cost: 2500]'
+                };
+            }
+
+            // 4. Mystery Crate at (0, -21.5)
+            if (player.theaterUnlocked && Math.hypot(p.x - 0, p.z - (-21.5)) < 3.4) {
+                if (crateState.status === 'idle') {
+                    return {
+                        type: 'crate_roll',
+                        cost: 950,
+                        label: 'Press [F] for Mystery Crate [Cost: 950]'
+                    };
+                } else if (crateState.status === 'ready') {
+                    const names = {
+                        krig: 'Krig-A1 Assault Rifle',
+                        raygun: 'Aether Ray-X1 Wonder Weapon',
+                        jester: 'Clockwork Jester Bombs (x3)'
+                    };
+                    return {
+                        type: 'crate_claim',
+                        cost: 0,
+                        label: `Press [F] to Claim ${names[crateState.offeredItem]}`
+                    };
+                }
+            }
+
+            // 5. Window Barricades
+            for (const win of windows) {
+                if (Math.hypot(p.x - win.x, p.z - win.z) < 3.1 && win.planks < win.maxPlanks) {
+                    return {
+                        type: 'window',
+                        windowObj: win,
+                        label: 'Hold/Tap [F] to Rebuild Barricade (+10 Pts)'
+                    };
+                }
+            }
+
+            return null;
+        }
+
+        function giveOrReplaceWeapon(weaponId) {
+            const spec = WEAPON_DB[weaponId];
+            const existingIdx = player.weapons.findIndex(w => w.id === weaponId);
+
+            if (existingIdx !== -1) {
+                player.weapons[existingIdx].mag = spec.magSize;
+                player.weapons[existingIdx].reserve = spec.maxReserve;
+                player.activeSlot = existingIdx;
+            } else if (player.weapons.length < 2) {
+                player.weapons.push({ id: weaponId, mag: spec.magSize, reserve: spec.maxReserve });
+                player.activeSlot = player.weapons.length - 1;
+            } else {
+                player.weapons[player.activeSlot] = { id: weaponId, mag: spec.magSize, reserve: spec.maxReserve };
+            }
+            player.isReloading = false;
+            rebuildViewModel(player.weapons[player.activeSlot].id);
+            updateHUD();
+        }
+
+        function triggerInteraction(elapsed) {
+            const action = getClosestInteraction();
+            if (!action) return;
+
+            if (action.type === 'door') {
+                if (player.points >= action.cost) {
+                    addPoints(-action.cost);
+                    player.theaterUnlocked = true;
+                    debrisCollider.active = false;
+                    scene.remove(debrisDoorGroup);
+                    playSound('explosion');
+                }
+            } else if (action.type === 'm14') {
+                if (player.points >= action.cost) {
+                    addPoints(-action.cost);
+                    giveOrReplaceWeapon('m14');
+                    playSound('cash');
+                }
+            } else if (action.type === 'perk') {
+                if (player.points >= action.cost) {
+                    addPoints(-action.cost);
+                    player.hasVitalitySoda = true;
+                    player.maxHp = 250;
+                    player.hp = 250;
+                    document.getElementById('perk-jugg').classList.remove('hidden');
+                    document.getElementById('perk-jugg').classList.add('flex');
+                    playSound('cash');
+                }
+            } else if (action.type === 'crate_roll') {
+                if (player.points >= action.cost) {
+                    addPoints(-action.cost);
+                    crateState.status = 'rolling';
+                    crateState.timer = 3.0;
+                    const pool = ['krig', 'raygun', 'jester'];
+                    crateState.offeredItem = pool[Math.floor(Math.random() * pool.length)];
+                    cratePreviewMesh.visible = true;
+                    playSound('jester_chime');
+                }
+            } else if (action.type === 'crate_claim') {
+                if (crateState.offeredItem === 'jester') {
+                    player.tacticalCount = 3;
+                } else {
+                    giveOrReplaceWeapon(crateState.offeredItem);
+                }
+                crateState.status = 'idle';
+                cratePreviewMesh.visible = false;
+                playSound('cash');
+                updateHUD();
+            } else if (action.type === 'window') {
+                if (elapsed - player.lastRepairTime > 0.45) {
+                    const w = action.windowObj;
+                    w.plankMeshes[w.planks].visible = true;
+                    w.planks++;
+                    player.lastRepairTime = elapsed;
+                    addPoints(10);
+                    playSound('plank');
+                }
+            }
+        }
+
+        // ============================================================================
+        // 9. INPUT & POINTER LOCK CONTROLS
+        // ============================================================================
+        const keys = {};
+        let isMouseDown = false;
+        let isPointerLocked = false;
+        let isGameOver = false;
+
+        document.getElementById('btn-play').addEventListener('click', () => {
+            getAudio();
+            renderer.domElement.requestPointerLock();
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            isPointerLocked = (document.pointerLockElement === renderer.domElement);
+            const startOverlay = document.getElementById('start-overlay');
+            if (isPointerLocked) {
+                startOverlay.classList.add('hidden');
+            } else if (!isGameOver) {
+                startOverlay.classList.remove('hidden');
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isPointerLocked || isGameOver) return;
+            const sens = player.isADS ? 0.0014 : 0.0022;
+            player.yaw -= e.movementX * sens;
+            player.pitch = Math.max(-1.42, Math.min(1.42, player.pitch - e.movementY * sens));
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if (!isPointerLocked || isGameOver) return;
+            if (e.button === 0) {
+                isMouseDown = true;
+                fireCurrentWeapon(clock.getElapsedTime());
+            } else if (e.button === 2) {
+                player.isADS = true;
+            }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (e.button === 0) isMouseDown = false;
+            if (e.button === 2) player.isADS = false;
+        });
+
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (!isPointerLocked || isGameOver) return;
+
+            if (e.code === 'KeyR') startReload(clock.getElapsedTime());
+            if (e.code === 'KeyG') throwClockworkJester();
+            if (e.code === 'KeyF') triggerInteraction(clock.getElapsedTime());
+            if (e.code === 'Digit1' && player.weapons.length >= 1) switchWeapon(0);
+            if (e.code === 'Digit2' && player.weapons.length >= 2) switchWeapon(1);
+            if (e.code === 'Space' && Math.abs(player.velY) < 0.01) player.velY = 5.6;
+        });
+
+        window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+        window.addEventListener('wheel', (e) => {
+            if (!isPointerLocked || player.weapons.length < 2) return;
+            switchWeapon(player.activeSlot === 0 ? 1 : 0);
+        });
+
+        function switchWeapon(slotIdx) {
+            if (player.activeSlot === slotIdx) return;
+            player.activeSlot = slotIdx;
+            player.isReloading = false;
+            rebuildViewModel(player.weapons[slotIdx].id);
+            updateHUD();
+        }
+
+        function checkWallCollision(nx, nz) {
+            const radius = 0.55;
+            for (const c of wallColliders) {
+                if (!c.active) continue;
+                if (nx + radius > c.minX && nx - radius < c.maxX &&
+                    nz + radius > c.minZ && nz - radius < c.maxZ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // ============================================================================
+        // 10. MAIN GAME & PHYSICS UPDATE LOOP
+        // ============================================================================
+        const clock = new THREE.Clock();
+
+        function resetGame() {
+            isGameOver = false;
+            document.getElementById('gameover-overlay').classList.add('hidden');
+            document.getElementById('gameover-overlay').classList.remove('flex');
+            document.getElementById('perk-jugg').classList.add('hidden');
+
+            player.pos.set(0, 1.7, 11);
+            player.yaw = 0;
+            player.pitch = 0;
+            player.maxHp = 100;
+            player.hp = 100;
+            player.points = 500;
+            player.kills = 0;
+            player.headshots = 0;
+            player.hasVitalitySoda = false;
+            player.theaterUnlocked = false;
+            player.tacticalCount = 2;
+            player.weapons = [{ id: 'pistol1911', mag: 8, reserve: 64 }];
+            player.activeSlot = 0;
+            player.isReloading = false;
+
+            if (!debrisCollider.active) {
+                debrisCollider.active = true;
+                scene.add(debrisDoorGroup);
+            }
+
+            windows.forEach(w => {
+                w.planks = 5;
+                w.plankMeshes.forEach(pm => pm.visible = true);
+            });
+
+            zombies.forEach(z => scene.remove(z.mesh));
+            zombies.length = 0;
+
+            roundState.round = 1;
+            roundState.remainingToSpawn = 6;
+            roundState.inIntermission = false;
+            document.getElementById('round-display').textContent = 'I';
+
+            rebuildViewModel('pistol1911');
+            updateHUD();
+            renderer.domElement.requestPointerLock();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1);
+            const elapsed = clock.getElapsedTime();
+
+            if (isPointerLocked && !isGameOver) {
+                // 1. Player Rotation & Movement
+                camera.rotation.order = 'YXZ';
+                camera.rotation.y = player.yaw;
+                camera.rotation.x = player.pitch;
+
+                const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+                const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+                const moveVec = new THREE.Vector3();
+
+                if (keys['KeyW']) moveVec.add(forward);
+                if (keys['KeyS']) moveVec.sub(forward);
+                if (keys['KeyD']) moveVec.add(right);
+                if (keys['KeyA']) moveVec.sub(right);
+
+                if (moveVec.lengthSq() > 0) {
+                    moveVec.normalize();
+                    const isSprinting = keys['ShiftLeft'] && !player.isADS;
+                    const speed = isSprinting ? 7.2 : (player.isADS ? 3.2 : 5.0);
+                    const nx = player.pos.x + moveVec.x * speed * dt;
+                    const nz = player.pos.z + moveVec.z * speed * dt;
+
+                    if (!checkWallCollision(nx, player.pos.z)) player.pos.x = nx;
+                    if (!checkWallCollision(player.pos.x, nz)) player.pos.z = nz;
+                }
+
+                // Hold [F] continuous window repair
+                if (keys['KeyF']) {
+                    const act = getClosestInteraction();
+                    if (act && act.type === 'window') triggerInteraction(elapsed);
+                }
+
+                // Gravity & Stage Step-Up Height
+                const floorHeight = (player.pos.z < -17.5 ? 0.6 : 0) + 1.7;
+                player.velY -= 15.0 * dt;
+                player.pos.y += player.velY * dt;
+                if (player.pos.y <= floorHeight) {
+                    player.pos.y = floorHeight;
+                    player.velY = 0;
+                }
+                camera.position.copy(player.pos);
+
+                // 2. Weapon ADS, Automatic Fire, & Reload Completion
+                const activeWep = player.weapons[player.activeSlot];
+                const spec = WEAPON_DB[activeWep.id];
+                if (isMouseDown && spec.auto) {
+                    fireCurrentWeapon(elapsed);
+                }
+
+                if (player.isReloading && elapsed >= player.reloadEndTime) {
+                    const needed = spec.magSize - activeWep.mag;
+                    const take = Math.min(needed, activeWep.reserve);
+                    activeWep.mag += take;
+                    activeWep.reserve -= take;
+                    player.isReloading = false;
+                    updateHUD();
+                }
+
+                // Smooth Viewmodel Bobbing & ADS Interpolation
+                const targetFov = player.isADS ? 52 : 75;
+                camera.fov += (targetFov - camera.fov) * 0.18;
+                camera.updateProjectionMatrix();
+
+                player.recoilKick *= 0.82;
+                const targetRigX = player.isADS ? 0 : 0.26;
+                const targetRigY = player.isADS ? -0.15 : -0.22 - (player.isReloading ? 0.18 : 0);
+                const targetRigZ = (player.isADS ? -0.35 : -0.48) + player.recoilKick;
+                weaponRig.position.lerp(new THREE.Vector3(targetRigX, targetRigY, targetRigZ), 0.25);
+
+                // 3. Health Regeneration & Blood Vignette
+                if (elapsed - player.lastHitTime > 4.0 && player.hp < player.maxHp) {
+                    player.hp = Math.min(player.maxHp, player.hp + 35 * dt);
+                }
+                const damageRatio = 1 - (player.hp / player.maxHp);
+                document.getElementById('blood-vignette').style.opacity = (damageRatio * 0.95).toFixed(2);
+
+                // 4. Contextual Prompt Banner
+                const promptEl = document.getElementById('interact-prompt');
+                const closestAct = getClosestInteraction();
+                if (closestAct) {
+                    promptEl.textContent = closestAct.label;
+                    promptEl.classList.remove('hidden');
+                } else {
+                    promptEl.classList.add('hidden');
+                }
+
+                // 5. Mystery Crate Cycling Logic
+                if (crateState.status === 'rolling') {
+                    crateState.timer -= dt;
+                    cratePreviewMesh.rotation.y += 8 * dt;
+                    cratePreviewMesh.position.y = 1.45 + Math.sin(elapsed * 10) * 0.12;
+                    const colors = [0x38bdf8, 0x4ade80, 0xfacc15, 0xa855f7];
+                    cratePreviewMesh.material.color.setHex(colors[Math.floor(elapsed * 8) % colors.length]);
+
+                    if (crateState.timer <= 0) {
+                        crateState.status = 'ready';
+                        crateState.timer = 9.0; // 9 seconds to claim before resetting
+                        const finalColor = crateState.offeredItem === 'raygun'
+                            ? 0x4ade80
+                            : (crateState.offeredItem === 'jester' ? 0xa855f7 : 0x38bdf8);
+                        cratePreviewMesh.material.color.setHex(finalColor);
+                    }
+                } else if (crateState.status === 'ready') {
+                    crateState.timer -= dt;
+                    cratePreviewMesh.rotation.y += 2 * dt;
+                    if (crateState.timer <= 0) {
+                        crateState.status = 'idle';
+                        cratePreviewMesh.visible = false;
+                    }
+                }
+
+                // 6. Active Clockwork Jester Decoy Update
+                if (activeDecoy) {
+                    activeDecoy.timer -= dt;
+                    activeDecoy.nextChime -= dt;
+                    activeDecoy.mesh.rotation.y += 6 * dt;
+                    const s = 1 + Math.sin(elapsed * 12) * 0.35;
+                    activeDecoy.ring.scale.set(s, s, 1);
+
+                    if (activeDecoy.nextChime <= 0) {
+                        playSound('jester_chime');
+                        activeDecoy.nextChime = 0.75;
+                    }
+
+                    if (activeDecoy.timer <= 0) {
+                        playSound('explosion');
+                        spawnShockwave(activeDecoy.pos, 0xfacc15, 9);
+                        for (let i = zombies.length - 1; i >= 0; i--) {
+                            const z = zombies[i];
+                            if (z.mesh.position.distanceTo(activeDecoy.pos) < 8.5) {
+                                damageZombie(z, 1200, false);
+                            }
+                        }
+                        scene.remove(activeDecoy.mesh);
+                        activeDecoy = null;
+                    }
+                }
+
+                // 7. Aether Ray-X1 Plasma Projectiles Update
+                for (let i = plasmaBolts.length - 1; i >= 0; i--) {
+                    const b = plasmaBolts[i];
+                    b.life -= dt;
+                    b.mesh.position.addScaledVector(b.vel, dt);
+
+                    let hit = b.mesh.position.y <= 0.15 || checkWallCollision(b.mesh.position.x, b.mesh.position.z);
+                    if (!hit) {
+                        for (const z of zombies) {
+                            if (z.mesh.position.distanceTo(b.mesh.position) < 1.35) {
+                                hit = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (hit || b.life <= 0) {
+                        playSound('explosion');
+                        spawnShockwave(b.mesh.position, 0x4ade80, 5.5);
+                        for (let j = zombies.length - 1; j >= 0; j--) {
+                            const z = zombies[j];
+                            if (z.mesh.position.distanceTo(b.mesh.position) < 4.2) {
+                                damageZombie(z, WEAPON_DB.raygun.damage, false);
+                            }
+                        }
+                        scene.remove(b.mesh);
+                        plasmaBolts.splice(i, 1);
+                    }
+                }
+
+                // 8. Round & Spawning Progression
+                if (!roundState.inIntermission) {
+                    if (roundState.remainingToSpawn > 0 && zombies.length < 18) {
+                        roundState.spawnCooldown -= dt;
+                        if (roundState.spawnCooldown <= 0) {
+                            spawnZombie();
+                            roundState.remainingToSpawn--;
+                            roundState.spawnCooldown = Math.max(0.65, 2.2 - roundState.round * 0.14);
+                        }
+                    } else if (roundState.remainingToSpawn === 0 && zombies.length === 0) {
+                        roundState.inIntermission = true;
+                        roundState.intermissionTimer = 5.0;
+                        playSound('round_change');
+                        document.getElementById('round-display').classList.add('round-changing');
+                    }
+                } else {
+                    roundState.intermissionTimer -= dt;
+                    if (roundState.intermissionTimer <= 0) {
+                        roundState.inIntermission = false;
+                        roundState.round++;
+                        roundState.remainingToSpawn = 5 + roundState.round * 3;
+                        const rEl = document.getElementById('round-display');
+                        rEl.classList.remove('round-changing');
+                        rEl.textContent = toRomanOrTally(roundState.round);
+                    }
+                }
+
+                // 9. Update Zombies AI
+                zombies.forEach(z => {
+                    const pos = z.mesh.position;
+                    const win = z.targetWindow;
+                    z.mesh.rotation.z = Math.sin(elapsed * 6 + z.wobbleSeed) * 0.05;
+
+                    if (z.state === 'outside') {
+                        const target = new THREE.Vector3(win.x, 0, win.z);
+                        const dir = target.sub(pos);
+                        if (dir.length() < 0.75) {
+                            z.state = 'tearing';
+                            z.attackTimer = 1.1;
+                        } else {
+                            dir.normalize();
+                            pos.addScaledVector(dir, z.speed * dt);
+                            z.mesh.lookAt(win.x, 0, win.z);
+                        }
+                    } else if (z.state === 'tearing') {
+                        if (win.planks > 0) {
+                            z.attackTimer -= dt;
+                            if (z.attackTimer <= 0) {
+                                win.planks--;
+                                win.plankMeshes[win.planks].visible = false;
+                                playSound('plank');
+                                z.attackTimer = 1.25;
+                            }
+                        } else {
+                            z.state = 'entering';
+                        }
+                    } else if (z.state === 'entering') {
+                        const enterPt = new THREE.Vector3(win.enterX, 0, win.enterZ);
+                        const dir = enterPt.sub(pos);
+                        if (dir.length() < 0.4) {
+                            z.state = 'chasing';
+                        } else {
+                            dir.normalize();
+                            pos.addScaledVector(dir, z.speed * dt);
+                            z.mesh.lookAt(win.enterX, 0, win.enterZ);
+                        }
+                    } else if (z.state === 'chasing') {
+                        const chaseTarget = activeDecoy
+                            ? activeDecoy.pos.clone()
+                            : new THREE.Vector3(player.pos.x, 0, player.pos.z);
+
+                        // Funnel cleanly through the central doorway if crossing between Lobby & Theater
+                        if ((pos.z > 0.7 && chaseTarget.z < -0.7) || (pos.z < -0.7 && chaseTarget.z > 0.7)) {
+                            if (Math.abs(pos.x) > 1.7) {
+                                chaseTarget.set(0, 0, 0);
+                            }
+                        }
+
+                        const dir = chaseTarget.clone().sub(pos);
+                        dir.y = 0;
+                        const dist = dir.length();
+
+                        if (dist > 0.9) {
+                            dir.normalize();
+                            const stepX = pos.x + dir.x * z.speed * dt;
+                            const stepZ = pos.z + dir.z * z.speed * dt;
+                            if (!checkWallCollision(stepX, pos.z)) pos.x = stepX;
+                            if (!checkWallCollision(pos.x, stepZ)) pos.z = stepZ;
+                            pos.y = pos.z < -17.5 ? 0.6 : 0;
+                            z.mesh.lookAt(chaseTarget.x, pos.y, chaseTarget.z);
+                        }
+
+                        // Melee Attack Player if within reach and not distracted by decoy
+                        if (!activeDecoy && pos.distanceTo(new THREE.Vector3(player.pos.x, pos.y, player.pos.z)) < 1.55) {
+                            z.attackTimer -= dt;
+                            if (z.attackTimer <= 0) {
+                                z.attackTimer = 0.95;
+                                player.hp -= 50;
+                                player.lastHitTime = elapsed;
+                                playSound('pistol');
+                                if (player.hp <= 0) {
+                                    isGameOver = true;
+                                    document.exitPointerLock();
+                                    document.getElementById('gameover-rounds').textContent =
+                                        `${roundState.round} ${roundState.round === 1 ? 'ROUND' : 'ROUNDS'}`;
+                                    document.getElementById('gameover-stats').textContent =
+                                        `Kills: ${player.kills} • Headshots: ${player.headshots}`;
+                                    const go = document.getElementById('gameover-overlay');
+                                    go.classList.remove('hidden');
+                                    go.classList.add('flex');
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Update Blood & Shockwave Effects
+            for (let i = bloodParticles.length - 1; i >= 0; i--) {
+                const bp = bloodParticles[i];
+                bp.life -= dt;
+                bp.vel.y -= 12 * dt;
+                bp.mesh.position.addScaledVector(bp.vel, dt);
+                if (bp.life <= 0) {
+                    scene.remove(bp.mesh);
+                    bloodParticles.splice(i, 1);
+                }
+            }
+
+            for (let i = shockwaveRings.length - 1; i >= 0; i--) {
+                const sw = shockwaveRings[i];
+                sw.age += dt;
+                const t = sw.age / sw.maxAge;
+                const s = 1 + t * sw.maxScale;
+                sw.mesh.scale.set(s, s, 1);
+                sw.mesh.material.opacity = Math.max(0, 1 - t);
+                if (sw.age >= sw.maxAge) {
+                    scene.remove(sw.mesh);
+                    shockwaveRings.splice(i, 1);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        window.onload = () => {
+            buildTheaterMap();
+            rebuildViewModel('pistol1911');
+            updateHUD();
+            animate();
+        };
+    </script>
+</body>
+</html>
